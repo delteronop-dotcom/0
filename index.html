@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Ecos Eternos: Angeles 💌</title>
+    <style>
+        body, html { margin: 0; overflow: hidden; background: #000; font-family: 'serif'; touch-action: none; }
+        #ui-layer { position: absolute; width: 100%; height: 100%; z-index: 10; pointer-events: none; color: white; }
+        #screen { position: absolute; width: 100%; height: 100%; background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; pointer-events: auto; z-index: 20; }
+        #hud { position: absolute; top: 20px; width: 100%; text-align: center; opacity: 0; }
+        #realm-name { font-size: 1.4em; font-weight: bold; }
+        #instruction { font-size: 0.9em; color: #ff3366; margin-top: 5px; animation: blink 1s infinite; }
+        @keyframes blink { 50% { opacity: 0.3; } }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div id="screen">
+            <h1 style="color: #ff3366;">ECOS ETERNOS</h1>
+            <p>Un desafío diferente en cada Reino</p>
+            <button id="main-btn" style="padding: 15px 40px; background: #ff3366; color: white; border: none; border-radius: 30px; font-weight: bold;">EMPEZAR</button>
+        </div>
+        <div id="hud">
+            <div id="realm-name">REINO 1</div>
+            <div id="instruction">¡Recolecta el fuego!</div>
+            <div id="stats" style="margin-top:5px;">Diamantes: 0 / 15</div>
+        </div>
+    </div>
+
+    <script type="importmap"> { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } } </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        let scene, camera, renderer, heart, grid;
+        let diamantes = [], obstaculos = [];
+        let score = 0, realm = 1, moveDir = 0, isGameOver = false;
+
+        const REINOS = [
+            { n: "FUEGO INICIAL", c: 0xff4400, bg: 0x1a0500, i: "Mueve el corazón e inicia el viaje" },
+            { n: "MAREAS ALTAS", c: 0x00ffff, bg: 0x000a1a, i: "¡Cuidado! El corazón ahora flota solo" },
+            { n: "PASIÓN MÓVIL", c: 0xff0088, bg: 0x1a000a, i: "Los diamantes huyen, ¡atrápalos!" },
+            { n: "BOSQUE DE ESPINAS", c: 0x00ff66, bg: 0x001a05, i: "¡Esquiva los pilares oscuros!" },
+            { n: "VIENTO ETERNO", c: 0xffaa00, bg: 0x1a1500, i: "El viento te empuja, mantén el centro" },
+            { n: "ECOS INVISIBLES", c: 0x4444ff, bg: 0x05001a, i: "Toca la pantalla para ver los diamantes" },
+            { n: "EL TRONO FINAL", c: 0xffffff, bg: 0x111111, i: "Recolecta luz para vencer la sombra" }
+        ];
+
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 4, 12);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            grid = new THREE.GridHelper(200, 40, 0xffffff, 0xffffff);
+            scene.add(grid);
+
+            const shape = new THREE.Shape();
+            shape.moveTo(0, 10); shape.bezierCurveTo(10, 20, 20, 10, 20, 0); shape.bezierCurveTo(20, -10, 10, -18, 0, -28);
+            shape.bezierCurveTo(-10, -18, -20, -10, -20, 0); shape.bezierCurveTo(-20, 10, -10, 20, 0, 10);
+            heart = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, {depth:4}), new THREE.MeshPhongMaterial({color: 0xff3366}));
+            heart.scale.set(0.04, 0.04, 0.04); heart.rotation.x = Math.PI; heart.rotation.z = Math.PI;
+            scene.add(heart);
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+            setupControls();
+            updateRealm();
+            animate();
+        }
+
+        function setupControls() {
+            window.addEventListener('touchstart', (e) => {
+                moveDir = e.touches[0].clientX < window.innerWidth/2 ? -1 : 1;
+                if(realm === 6) diamantes.forEach(d => d.visible = true); // Revelar en reino 6
+            });
+            window.addEventListener('touchend', () => {
+                moveDir = 0;
+                if(realm === 6) diamantes.forEach(d => d.visible = false);
+            });
+        }
+
+        function updateRealm() {
+            const r = REINOS[realm-1];
+            scene.background = new THREE.Color(r.bg);
+            grid.material.color.setHex(r.c);
+            document.getElementById('realm-name').innerText = `REINO ${realm}: ${r.n}`;
+            document.getElementById('instruction').innerText = r.i;
+            if(navigator.vibrate) navigator.vibrate(100);
+        }
+
+        function spawn() {
+            if(isGameOver) return;
+            // Diamante
+            const d = new THREE.Mesh(new THREE.OctahedronGeometry(0.8), new THREE.MeshPhongMaterial({color: REINOS[realm-1].c}));
+            d.position.set((Math.random()-0.5)*12, 1, -50);
+            if(realm === 6) d.visible = false;
+            scene.add(d);
+            diamantes.push(d);
+
+            // Obstáculo (Solo en Reino 4)
+            if(realm === 4 && Math.random() < 0.2) {
+                const obs = new THREE.Mesh(new THREE.BoxGeometry(2, 8, 2), new THREE.MeshPhongMaterial({color: 0x000000}));
+                obs.position.set((Math.random()-0.5)*12, 4, -60);
+                scene.add(obs);
+                obstaculos.push(obs);
+            }
+        }
+
+        function animate() {
+            if(isGameOver) return;
+            requestAnimationFrame(animate);
+
+            if(Math.random() < 0.04) spawn();
+
+            // MECÁNICAS ÚNICAS DE MOVIMIENTO
+            heart.position.x += moveDir * 0.25;
+            
+            if(realm === 2) heart.position.y = 1 + Math.sin(Date.now() * 0.003) * 1.5; // Flotar
+            if(realm === 5) heart.position.x += Math.sin(Date.now() * 0.002) * 0.1; // Viento
+            
+            heart.position.x = Math.max(Math.min(heart.position.x, 6), -6);
+            heart.rotation.y += 0.03;
+
+            grid.position.z += 0.2; if(grid.position.z > 5) grid.position.z = 0;
+
+            // Lógica de Obstáculos
+            obstaculos.forEach((o, i) => {
+                o.position.z += 0.5;
+                if(heart.position.distanceTo(o.position) < 2) {
+                    score = Math.max(0, score - 1); // Penalización
+                    scene.remove(o); obstaculos.splice(i, 1);
+                }
+            });
+
+            // Lógica de Diamantes
+            for(let i = diamantes.length-1; i>=0; i--) {
+                const d = diamantes[i];
+                d.position.z += 0.5;
+                if(realm === 3) d.position.x += Math.cos(Date.now() * 0.01) * 0.1; // Zig-zag
+
+                if(d.position.z > -1 && d.position.z < 1 && Math.abs(d.position.x - heart.position.x) < 2) {
+                    scene.remove(d); diamantes.splice(i, 1);
+                    score++;
+                    document.getElementById('stats').innerText = `Diamantes: ${score} / 15`;
+                    if(score >= 15) {
+                        score = 0; realm++;
+                        if(realm > 7) { isGameOver = true; alert("¡Felicidades Angeles! Nuestro amor es eterno."); location.reload(); }
+                        else updateRealm();
+                    }
+                }
+                if(d.position.z > 15) { scene.remove(d); diamantes.splice(i,1); }
+            }
+            renderer.render(scene, camera);
+        }
+
+        document.getElementById('main-btn').addEventListener('click', () => {
+            document.getElementById('screen').style.display = 'none';
+            document.getElementById('hud').style.opacity = '1';
+            init();
+        });
+    </script>
+</body>
+</html>
